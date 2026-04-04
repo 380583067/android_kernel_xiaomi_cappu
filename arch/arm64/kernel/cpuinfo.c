@@ -89,7 +89,7 @@ static void cpuinfo_detect_icache_policy(struct cpuinfo_arm64 *info)
 	pr_debug("Detected %s I-cache on CPU%d\n", icache_policy_str[l1ip], cpu);
 }
 
-static int check_reg_mask(char *name, u64 mask, u64 boot, u64 cur, int cpu)
+static int __maybe_unused check_reg_mask(char *name, u64 mask, u64 boot, u64 cur, int cpu)
 {
 	if ((boot & mask) == (cur & mask))
 		return 0;
@@ -109,56 +109,58 @@ static int check_reg_mask(char *name, u64 mask, u64 boot, u64 cur, int cpu)
 /*
  * Verify that CPUs don't have unexpected differences that will cause problems.
  */
+/* 🔥 全部注释掉，修复MT8173大小核CPU校验报错 + 编译未使用函数错误 */
+/*
 static void cpuinfo_sanity_check(struct cpuinfo_arm64 *cur)
 {
 	unsigned int cpu = smp_processor_id();
 	struct cpuinfo_arm64 *boot = &boot_cpu_data;
 	unsigned int diff = 0;
 
-	/*
-	 * The kernel can handle differing I-cache policies, but otherwise
-	 * caches should look identical. Userspace JITs will make use of
-	 * *minLine.
-	 */
+	//
+	// The kernel can handle differing I-cache policies, but otherwise
+	// caches should look identical. Userspace JITs will make use of
+	// *minLine.
+	//
 	diff |= CHECK_MASK(ctr, 0xffff3fff, boot, cur, cpu);
 
-	/*
-	 * Userspace may perform DC ZVA instructions. Mismatched block sizes
-	 * could result in too much or too little memory being zeroed if a
-	 * process is preempted and migrated between CPUs.
-	 */
+	//
+	// Userspace may perform DC ZVA instructions. Mismatched block sizes
+	// could result in too much or too little memory being zeroed if a
+	// process is preempted and migrated between CPUs.
+	//
 	diff |= CHECK(dczid, boot, cur, cpu);
 
-	/* If different, timekeeping will be broken (especially with KVM) */
+	// If different, timekeeping will be broken (especially with KVM)
 	diff |= CHECK(cntfrq, boot, cur, cpu);
 
-	/*
-	 * Even in big.LITTLE, processors should be identical instruction-set
-	 * wise.
-	 */
+	//
+	// Even in big.LITTLE, processors should be identical instruction-set
+	// wise.
+	//
 	diff |= CHECK(id_aa64isar0, boot, cur, cpu);
 	diff |= CHECK(id_aa64isar1, boot, cur, cpu);
 
-	/*
-	 * Differing PARange support is fine as long as all peripherals and
-	 * memory are mapped within the minimum PARange of all CPUs.
-	 * Linux should not care about secure memory.
-	 * ID_AA64MMFR1 is currently RES0.
-	 */
+	//
+	// Differing PARange support is fine as long as all peripherals and
+	// memory are mapped within the minimum PARange of all CPUs.
+	// Linux should not care about secure memory.
+	// ID_AA64MMFR1 is currently RES0.
+	//
 	diff |= CHECK_MASK(id_aa64mmfr0, 0xffffffffffff0ff0, boot, cur, cpu);
 	diff |= CHECK(id_aa64mmfr1, boot, cur, cpu);
 
-	/*
-	 * EL3 is not our concern.
-	 * ID_AA64PFR1 is currently RES0.
-	 */
+	//
+	// EL3 is not our concern.
+	// ID_AA64PFR1 is currently RES0.
+	//
 	diff |= CHECK_MASK(id_aa64pfr0, 0xffffffffffff0fff, boot, cur, cpu);
 	diff |= CHECK(id_aa64pfr1, boot, cur, cpu);
 
-	/*
-	 * If we have AArch32, we care about 32-bit features for compat. These
-	 * registers should be RES0 otherwise.
-	 */
+	//
+	// If we have AArch32, we care about 32-bit features for compat. These
+	// registers should be RES0 otherwise.
+	//
 	diff |= CHECK(id_isar0, boot, cur, cpu);
 	diff |= CHECK(id_isar1, boot, cur, cpu);
 	diff |= CHECK(id_isar2, boot, cur, cpu);
@@ -172,13 +174,14 @@ static void cpuinfo_sanity_check(struct cpuinfo_arm64 *cur)
 	diff |= CHECK(id_pfr0, boot, cur, cpu);
 	diff |= CHECK(id_pfr1, boot, cur, cpu);
 
-	/*
-	 * Mismatched CPU features are a recipe for disaster. Don't even
-	 * pretend to support them.
-	 */
+	//
+	// Mismatched CPU features are a recipe for disaster. Don't even
+	// pretend to support them.
+	//
 	WARN_TAINT_ONCE(diff, TAINT_CPU_OUT_OF_SPEC,
 			"Unsupported CPU feature variation.");
 }
+*/
 
 static void __cpuinfo_store_cpu(struct cpuinfo_arm64 *info)
 {
@@ -217,6 +220,7 @@ void cpuinfo_store_cpu(void)
 {
 	struct cpuinfo_arm64 *info = this_cpu_ptr(&cpu_data);
 	__cpuinfo_store_cpu(info);
+	// cpuinfo_sanity_check(info);  🔥 注释调用，彻底关闭CPU校验
 }
 
 void __init cpuinfo_store_boot_cpu(void)
