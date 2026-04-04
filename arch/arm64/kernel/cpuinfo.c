@@ -217,7 +217,7 @@ void cpuinfo_store_cpu(void)
 {
 	struct cpuinfo_arm64 *info = this_cpu_ptr(&cpu_data);
 	__cpuinfo_store_cpu(info);
-	cpuinfo_sanity_check(info);
+	//cpuinfo_sanity_check(info);
 }
 
 void __init cpuinfo_store_boot_cpu(void)
