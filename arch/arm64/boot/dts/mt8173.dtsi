@@ -450,20 +450,44 @@
 			};
 		};
 
-		scpsys: scpsys@10006000 {
-			compatible = "mediatek,mt8173-scpsys", "syscon";
-			#power-domain-cells = <1>;
-			reg = <0 0x10006000 0 0x1000>;
-			infracfg = <&infracfg>;
-			clocks = <&topckgen CLK_TOP_MM_SEL>;
-			clock-names = "disp";
-			interrupts =	<0 155 0x8>,
-					<0 156 0x8>,
-					<0 157 0x8>,
-					<0 158 0x8>,
-					<0 159 0x8>,
-					<0 160 0x8>;
-		};
+ 		scpsys: scpsys@10006000 {
+ 			compatible = "mediatek,mt8173-scpsys", "syscon";
+ 			#power-domain-cells = <1>;
+ 			reg = <0 0x10006000 0 0x1000>;
+ 			infracfg = <&infracfg>;
+ 			clocks = <&topckgen CLK_TOP_MM_SEL>;
+ 			clock-names = "disp";
+ 			interrupts =	<0 155 0x8>,
+ 					<0 156 0x8>,
+ 					<0 157 0x8>,
+ 					<0 158 0x8>,
+ 					<0 159 0x8>,
+ 					<0 160 0x8>;
+
+			pd_mfg: power-domain@MT8173_POWER_DOMAIN_MFG {
+				reg = <MT8173_POWER_DOMAIN_MFG>;
+				clocks = <&topckgen CLK_TOP_MFG_SEL>;
+				clock-names = "mfg";
+				#address-cells = <1>;
+				#size-cells = <0>;
+			};
+
+			pd_mfg_2d: power-domain@MT8173_POWER_DOMAIN_MFG_2D {
+				reg = <MT8173_POWER_DOMAIN_MFG_2D>;
+				clocks = <&topckgen CLK_TOP_AXI_MFG_IN_SEL>;
+				clock-names = "mfg";
+				#address-cells = <1>;
+				#size-cells = <0>;
+			};
+
+			pd_mfg_async: power-domain@MT8173_POWER_DOMAIN_MFG_ASYNC {
+				reg = <MT8173_POWER_DOMAIN_MFG_ASYNC>;
+				clocks = <&topckgen CLK_TOP_AXI_MFG_IN_SEL>;
+				clock-names = "mfg";
+				#address-cells = <1>;
+				#size-cells = <0>;
+			};
+ 		};
 
 		toprgu: toprgu@10007000 {
 			compatible = "mediatek,mt8173-rgu";
