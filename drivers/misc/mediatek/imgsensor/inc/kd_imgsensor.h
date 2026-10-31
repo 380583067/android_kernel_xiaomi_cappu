@@ -91,6 +91,8 @@ NSFeature :  : RAWSensorInfo < _id >  :  : getFlickerPara \
 #define KDIMGSENSORIOC_X_SET_SHUTTER_GAIN_WAIT_DONE _IOWR(IMGSENSORMAGIC, 55, u32)
 /* set mclk */
 #define KDIMGSENSORIOC_X_SET_MCLK_PLL               _IOWR(IMGSENSORMAGIC, 60, ACDK_SENSOR_MCLK_STRUCT)
+/* Some 32-bit cappu camera HAL blobs encode the 12-byte MCLK ABI. */
+#define KDIMGSENSORIOC_X_SET_MCLK_PLL_12BYTE        _IOC(_IOC_READ | _IOC_WRITE, IMGSENSORMAGIC, 60, 12)
 #define KDIMGSENSORIOC_X_GETINFO2                   _IOWR(IMGSENSORMAGIC, 65, IMAGESENSOR_GETINFO_STRUCT)
 /* set open/close sensor index */
 #define KDIMGSENSORIOC_X_SET_CURRENT_SENSOR         _IOWR(IMGSENSORMAGIC, 70, u32)

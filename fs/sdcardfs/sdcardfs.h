@@ -224,6 +224,8 @@ struct sdcardfs_mount_options {
 	bool multiuser;
 	bool gid_derivation;
 	bool default_normal;
+	/* Android 12 sdcardfs mount policy: do not graft OBB paths across users. */
+	bool unshared_obb;
 	unsigned int reserved_mb;
 };
 

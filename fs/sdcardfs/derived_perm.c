@@ -356,7 +356,10 @@ int need_graft_path(struct dentry *dentry)
 	struct sdcardfs_sb_info *sbi = SDCARDFS_SB(dentry->d_sb);
 	struct qstr obb = QSTR_LITERAL("obb");
 
-	if (parent_info->data->perm == PERM_ANDROID &&
+	/* Android 12 requests unshared_obb so one user's OBB path is never grafted
+	 * into another user's tree; preserve the legacy graft only on old mounts. */
+	if (!sbi->options.unshared_obb &&
+			parent_info->data->perm == PERM_ANDROID &&
 			qstr_case_eq(&dentry->d_name, &obb)) {
 
 		/* /Android/obb is the base obbpath of DERIVED_UNIFIED */

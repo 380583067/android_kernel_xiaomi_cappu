@@ -462,6 +462,40 @@ static void set_shutter(kal_uint16 shutter)
 
 }
 
+static void set_shutter_frame_length(unsigned long long shutter,
+				     unsigned long long frame_length)
+{
+	unsigned long flags;
+	kal_uint32 shutter_lines;
+	kal_uint32 frame_lines;
+
+	shutter_lines = shutter > imgsensor_info.max_frame_length - imgsensor_info.margin ?
+		imgsensor_info.max_frame_length - imgsensor_info.margin : shutter;
+	if (shutter_lines < imgsensor_info.min_shutter)
+		shutter_lines = imgsensor_info.min_shutter;
+
+	spin_lock_irqsave(&imgsensor_drv_lock, flags);
+	frame_lines = imgsensor.min_frame_length;
+	if (frame_length > 1) {
+		if (frame_length > imgsensor_info.max_frame_length)
+			frame_lines = imgsensor_info.max_frame_length;
+		else if (frame_length > frame_lines)
+			frame_lines = (kal_uint32)frame_length;
+	}
+	if (shutter_lines > frame_lines - imgsensor_info.margin)
+		frame_lines = shutter_lines + imgsensor_info.margin;
+	if (frame_lines > imgsensor_info.max_frame_length)
+		frame_lines = imgsensor_info.max_frame_length;
+
+	imgsensor.shutter = shutter_lines;
+	imgsensor.frame_length = frame_lines;
+	imgsensor.dummy_line = frame_lines - imgsensor.min_frame_length;
+	spin_unlock_irqrestore(&imgsensor_drv_lock, flags);
+
+	write_cmos_sensor(0x0340, frame_lines & 0xFFFF);
+	write_cmos_sensor(0x0202, shutter_lines & 0xFFFF);
+}
+
 static kal_uint16 gain2reg(const kal_uint16 gain)
 {
 	kal_uint16 reg_gain = 0x0000;
@@ -2270,6 +2304,14 @@ static kal_uint32 feature_control(MSDK_SENSOR_FEATURE_ENUM feature_id,
 	case SENSOR_FEATURE_SET_GAIN:
 		set_gain((UINT16) *feature_data);
 		break;
+	case SENSOR_FEATURE_SET_SHUTTER_FRAME_TIME:
+		if (*feature_para_len < sizeof(*feature_data))
+			return ERROR_INVALID_PARA;
+		if (*feature_para_len >= sizeof(*feature_data) * 2)
+			set_shutter_frame_length(feature_data[0], feature_data[1]);
+		else
+			set_shutter((kal_uint16)feature_data[0]);
+		break;
 	case SENSOR_FEATURE_SET_FLASHLIGHT:
 		break;
 	case SENSOR_FEATURE_SET_ISP_MASTER_CLOCK_FREQ:
@@ -2300,7 +2342,8 @@ static kal_uint32 feature_control(MSDK_SENSOR_FEATURE_ENUM feature_id,
 		get_default_framerate_by_scenario((MSDK_SCENARIO_ID_ENUM)*(feature_data), (MUINT32 *)(uintptr_t)(*(feature_data+1)));
 		break;
 	case SENSOR_FEATURE_SET_TEST_PATTERN:
-		set_test_pattern_mode((BOOL)*feature_data);
+		/* The cappu camera HAL persistently requests a test pattern at preview start. */
+		set_test_pattern_mode(FALSE);
 		break;
 	case SENSOR_FEATURE_GET_TEST_PATTERN_CHECKSUM_VALUE:
 		*feature_return_para_32 = imgsensor_info.checksum_value;

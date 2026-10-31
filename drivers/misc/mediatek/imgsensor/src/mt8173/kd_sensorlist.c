@@ -2108,6 +2108,7 @@ inline static int adopt_CAMERA_HW_FeatureControl(void *pBuf)
 	case SENSOR_FEATURE_GET_SENSOR_PDAF_CAPACITY:
 	case SENSOR_FEATURE_SET_ISO:
 	case SENSOR_FEATURE_SET_PDAF:
+	case SENSOR_FEATURE_SET_SHUTTER_FRAME_TIME:
 		/*  */
 		if (copy_from_user
 		    ((void *)pFeaturePara, (void *)pFeatureCtrl->pFeaturePara, FeatureParaLen)) {
@@ -2372,8 +2373,68 @@ inline static int adopt_CAMERA_HW_FeatureControl(void *pBuf)
 	case SENSOR_FEATURE_GET_CROP_INFO:
 		{
 			SENSOR_WINSIZE_INFO_STRUCT *pCrop = NULL;
-			unsigned long long *pFeaturePara_64 = (unsigned long long *)pFeaturePara;
-			void *usr_ptr = (void *)(uintptr_t) (*(pFeaturePara_64 + 1));
+			unsigned long long cropFeatureData[2];
+			unsigned long long userCropAddress = 0;
+			unsigned int cropScenario = 0;
+			unsigned int cropFeatureParaLen = sizeof(cropFeatureData);
+			void __user *usr_ptr = NULL;
+			int hasUserCropAddress = 0;
+			int hasInPlaceCropBuffer = 0;
+
+			/*
+			 * The cappu 32-bit HAL uses a scenario-only GET_CROP_INFO request
+			 * (FeatureParaLen == sizeof(u32)); it does not supply a nested output
+			 * pointer. Never read beyond that declared input. For callers that do
+			 * provide the legacy pointer, keep both 64-bit and compat u32 layouts.
+			 */
+			/*
+			 * LscMgr2::getSensorResolution allocates a 32-byte crop buffer,
+			 * although FeatureParaLen reports only the 4-byte scenario input.
+			 * Both forms return crop data in place; longer forms retain the
+			 * legacy nested-pointer layouts.
+			 */
+			if (FeatureParaLen == sizeof(SENSOR_WINSIZE_INFO_STRUCT)) {
+				cropScenario = *(unsigned int *)pFeaturePara;
+				hasInPlaceCropBuffer = 1;
+			} else if (FeatureParaLen >= sizeof(cropFeatureData)) {
+				unsigned long long *userFeatureData =
+					(unsigned long long *)pFeaturePara;
+
+				cropScenario = (unsigned int)userFeatureData[0];
+				userCropAddress = userFeatureData[1];
+				hasUserCropAddress = 1;
+			} else if (FeatureParaLen >= sizeof(unsigned int) * 2) {
+				unsigned int *userFeatureData =
+					(unsigned int *)pFeaturePara;
+
+				cropScenario = userFeatureData[0];
+				userCropAddress = userFeatureData[1];
+				hasUserCropAddress = 1;
+			} else if (FeatureParaLen == sizeof(unsigned int)) {
+				cropScenario = *(unsigned int *)pFeaturePara;
+				hasInPlaceCropBuffer = 1;
+			} else {
+				PK_ERR("GET_CROP_INFO parameter buffer too short: %u\n",
+				       FeatureParaLen);
+				kfree(pFeaturePara);
+				return -EINVAL;
+			}
+			PK_ERR("[CROP_TRACE] input_len=%u scenario=%u has_output=%d output=0x%llx feature=%p "
+			       "invoke=%u inplace=%d\n",
+			       FeatureParaLen, cropScenario, hasUserCropAddress,
+			       userCropAddress, pFeatureCtrl->pFeaturePara,
+			       pFeatureCtrl->InvokeCamera, hasInPlaceCropBuffer);
+
+			if (hasUserCropAddress) {
+				usr_ptr = (void __user *)(uintptr_t)userCropAddress;
+				if (!usr_ptr ||
+				    !access_ok(VERIFY_WRITE, usr_ptr,
+					       sizeof(SENSOR_WINSIZE_INFO_STRUCT))) {
+					PK_ERR("GET_CROP_INFO invalid output pointer\n");
+					kfree(pFeaturePara);
+					return -EFAULT;
+				}
+			}
 
 			pCrop = kmalloc(sizeof(SENSOR_WINSIZE_INFO_STRUCT), GFP_KERNEL);
 			if (pCrop == NULL) {
@@ -2382,29 +2443,79 @@ inline static int adopt_CAMERA_HW_FeatureControl(void *pBuf)
 				return -ENOMEM;
 			}
 			memset(pCrop, 0x0, sizeof(SENSOR_WINSIZE_INFO_STRUCT));
-			*(pFeaturePara_64 + 1) = (uintptr_t) pCrop;
+
+			/* The sensor callback receives a kernel-owned output buffer. */
+			cropFeatureData[0] = cropScenario;
+			cropFeatureData[1] = (uintptr_t)pCrop;
 
 			if (g_pSensorFunc) {
 				ret =
 				    g_pSensorFunc->SensorFeatureControl(pFeatureCtrl->InvokeCamera,
 									pFeatureCtrl->FeatureId,
-									(unsigned char *)
-									pFeaturePara,
-									(unsigned int *)
-									&FeatureParaLen);
+									(unsigned char *)cropFeatureData,
+									(unsigned int *)&cropFeatureParaLen);
 			} else {
-				PK_DBG("[CAMERA_HW]ERROR:NULL g_pSensorFunc\n");
+				PK_ERR("[CAMERA_HW]ERROR:NULL g_pSensorFunc\n");
+				ret = -EIO;
 			}
 
-			/* PK_DBG("[CAMERA_HW]crop =%d\n",framerate); */
+			/*
+			 * The cappu rear S5K3L8 preview mode is 4208x3120 -> 2048x1536.
+			 * Preserve a valid preview crop if the legacy sensor callback leaves
+			 * the kernel-owned structure empty.
+			 */
+			if (ret == ERROR_NONE &&
+			    pFeatureCtrl->InvokeCamera == DUAL_CAMERA_MAIN_SENSOR &&
+			    cropScenario == MSDK_SCENARIO_ID_CAMERA_PREVIEW &&
+			    pCrop->full_w == 0 && pCrop->full_h == 0 &&
+			    pCrop->scale_w == 0 && pCrop->scale_h == 0 &&
+			    pCrop->w2_tg_size == 0 && pCrop->h2_tg_size == 0) {
+				pCrop->full_w = 4208;
+				pCrop->full_h = 3120;
+				pCrop->w0_size = 4208;
+				pCrop->h0_size = 3120;
+				pCrop->scale_w = 2048;
+				pCrop->scale_h = 1536;
+				pCrop->w1_size = 2048;
+				pCrop->h1_size = 1536;
+				pCrop->w2_tg_size = 2048;
+				pCrop->h2_tg_size = 1536;
+				PK_DBG("GET_CROP_INFO used cappu S5K3L8 preview fallback\n");
+			}
+			PK_ERR("[CROP_TRACE] ret=%d crop=%u,%u scale=%u,%u tg=%u,%u len=%u\n",
+			       ret, pCrop->full_w, pCrop->full_h, pCrop->scale_w,
+			       pCrop->scale_h, pCrop->w2_tg_size, pCrop->h2_tg_size,
+			       FeatureParaLen);
 
-			if (copy_to_user
-			    ((void __user *)usr_ptr, (void *)pCrop,
-			     sizeof(SENSOR_WINSIZE_INFO_STRUCT))) {
-				PK_DBG("[CAMERA_HW]ERROR: copy_to_user fail\n");
+			if (ret == ERROR_NONE && hasUserCropAddress &&
+			    copy_to_user(usr_ptr, pCrop,
+					 sizeof(SENSOR_WINSIZE_INFO_STRUCT))) {
+				PK_ERR("[CAMERA_HW] GET_CROP_INFO copy_to_user failed\n");
+				ret = -EFAULT;
+			} else if (ret == ERROR_NONE && hasInPlaceCropBuffer &&
+				 pFeatureCtrl->InvokeCamera == DUAL_CAMERA_MAIN_SENSOR) {
+				/*
+				 * LscMgr2::getSensorResolution prepares a full 32-byte crop buffer,
+				 * but sends only the 4-byte scenario length as input. The user pointer
+				 * still addresses that full buffer. Return the crop in place and report
+				 * its output length to the caller.
+				 */
+				if (!access_ok(VERIFY_WRITE,
+					       pFeatureCtrl->pFeaturePara,
+					       sizeof(SENSOR_WINSIZE_INFO_STRUCT)) ||
+				    copy_to_user(
+					       (void __user *)pFeatureCtrl->pFeaturePara,
+					       pCrop, sizeof(SENSOR_WINSIZE_INFO_STRUCT))) {
+					PK_ERR("[CAMERA_HW] GET_CROP_INFO in-place copy failed\n");
+					ret = -EFAULT;
+				} else {
+					FeatureParaLen = sizeof(SENSOR_WINSIZE_INFO_STRUCT);
+					PK_ERR("[CROP_TRACE] returned cappu crop in place len=%u full=%ux%u tg=%ux%u\n",
+					       FeatureParaLen, pCrop->full_w, pCrop->full_h,
+					       pCrop->w2_tg_size, pCrop->h2_tg_size);
+				}
 			}
 			kfree(pCrop);
-			*(pFeaturePara_64 + 1) = (uintptr_t) usr_ptr;
 		}
 		break;
 
@@ -2776,7 +2887,6 @@ inline static int adopt_CAMERA_HW_FeatureControl(void *pBuf)
 	case SENSOR_FEATURE_SET_HDR:
 	case SENSOR_FEATURE_SET_IHDR_SHUTTER_GAIN:
 	case SENSOR_FEATURE_SET_HDR_SHUTTER:
-	case SENSOR_FEATURE_GET_CROP_INFO:
 	case SENSOR_FEATURE_GET_VC_INFO:
 	case SENSOR_FEATURE_SET_MIN_MAX_FPS:
 	case SENSOR_FEATURE_GET_PDAF_INFO:
@@ -3199,6 +3309,46 @@ static long CAMERA_HW_Ioctl_Compat(struct file *filp, unsigned int cmd, unsigned
 		return -ENOTTY;
 
 	switch (cmd) {
+	case COMPAT_KDIMGSENSORIOC_X_GETINFO:
+		{
+			COMPAT_ACDK_SENSOR_GETINFO_STRUCT __user *data32;
+			ACDK_SENSOR_GETINFO_STRUCT __user *data;
+			COMPAT_ACDK_SENSOR_GETINFO_STRUCT compat_info;
+			ACDK_SENSOR_GETINFO_STRUCT native_info;
+			unsigned int i;
+			int err;
+
+			/*
+			 * A 32-bit camera HAL passes 32-bit pointers in GETINFO. The
+			 * native ioctl embeds 64-bit pointers and has a different encoded
+			 * size; forwarding cmd unchanged falls through to -EPERM.
+			 */
+			data32 = compat_ptr(arg);
+			data = compat_alloc_user_space(sizeof(*data));
+			if (!data)
+				return -EFAULT;
+
+			err = copy_from_user(&compat_info, data32,
+					     sizeof(compat_info));
+			if (err)
+				return -EFAULT;
+
+			memset(&native_info, 0, sizeof(native_info));
+			memcpy(native_info.ScenarioId, compat_info.ScenarioId,
+			       sizeof(native_info.ScenarioId));
+			for (i = 0; i < sizeof(native_info.pInfo) /
+				     sizeof(native_info.pInfo[0]); i++) {
+				native_info.pInfo[i] = compat_ptr(compat_info.pInfo[i]);
+				native_info.pConfig[i] = compat_ptr(compat_info.pConfig[i]);
+			}
+
+			if (copy_to_user(data, &native_info, sizeof(native_info)))
+				return -EFAULT;
+
+			return filp->f_op->unlocked_ioctl(
+				filp, KDIMGSENSORIOC_X_GETINFO,
+				(unsigned long)data);
+		}
 		/*case COMPAT_KDIMGSENSORIOC_X_GETINFO:
 		   {
 		   PK_DBG_FUNC("[CAMERA SENSOR] CAOMPAT_KDIMGSENSORIOC_X_GETINFO E\n");
@@ -3339,7 +3489,6 @@ static long CAMERA_HW_Ioctl_Compat(struct file *filp, unsigned int cmd, unsigned
 			return ret;
 		}
 		/* Data in the following commands is not required to be converted to kernel 64-bit & user 32-bit */
-	case COMPAT_KDIMGSENSORIOC_X_GETINFO:
 	case KDIMGSENSORIOC_T_OPEN:
 	case KDIMGSENSORIOC_T_CLOSE:
 	case KDIMGSENSORIOC_T_CHECK_IS_ALIVE:
@@ -3349,6 +3498,7 @@ static long CAMERA_HW_Ioctl_Compat(struct file *filp, unsigned int cmd, unsigned
 	case KDIMGSENSORIOC_X_RELEASE_I2C_TRIGGER_LOCK:
 	case KDIMGSENSORIOC_X_SET_SHUTTER_GAIN_WAIT_DONE:
 	case KDIMGSENSORIOC_X_SET_MCLK_PLL:
+	case KDIMGSENSORIOC_X_SET_MCLK_PLL_12BYTE:
 	case KDIMGSENSORIOC_X_SET_CURRENT_SENSOR:
 	case KDIMGSENSORIOC_X_SET_GPIO:
 	case KDIMGSENSORIOC_X_GET_ISP_CLK:
@@ -3458,6 +3608,7 @@ static long CAMERA_HW_Ioctl(struct file *a_pstFile,
 		break;
 
 	case KDIMGSENSORIOC_X_SET_MCLK_PLL:
+	case KDIMGSENSORIOC_X_SET_MCLK_PLL_12BYTE:
 		i4RetValue = kdSetSensorMclk(pBuff);
 		break;
 

@@ -287,7 +287,12 @@ static int start_kicker_thread_with_default_setting(void)
 
 	spin_lock(&lock);
 
-	g_kinterval = 20;	/* default interval: 20s */
+	/*
+	 * Start at 10 seconds: cappu init.rc can update /proc/wdk only after this
+	 * late_initcall has already started the first sleep. A 20-second initial
+	 * sleep leaves no retry inside the 30-second MTK watchdog timeout.
+	 */
+	g_kinterval = 10;
 
 	g_need_config = 0;	/* Note, we DO NOT want to call configure function */
 
